@@ -63,8 +63,44 @@ def get_aida(aida_out_fname):
 
    return aida_data
 
+def get_gfs(gfs_in_fname):
+
+   #Open the GFS input file
+   gfs_fh = nc.Dataset(gfs_in_fname, 'r')
+
+   #Get dimensions from the file and place in the function output dict
+   gfs_data = {
+         'lev'  : gfs_fh.dimensions["lev"].size,
+         'lat'  : gfs_fh.dimensions["lat"].size,
+         'lon'  : gfs_fh.dimensions["lon"].size,
+         'levp' : gfs_fh.dimensions["levp"].size,
+         'latp' : gfs_fh.dimensions["latp"].size,
+         'lonp' : gfs_fh.dimensions["lonp"].size }
+
+   #Read all data into numpy arrays and add to the dictionary
+   for name,var in gfs_fh.variables.items():
+      gfs_data[name] = np.array(var)
+
+   # Construct pressure and add it to the dictionary
+   delp = gfs_data["delp"]
+   p = np.zeros(delp.shape)
+   p[0,:,:] = gfs_data["ps"][:,:] - delp[0,:,:]
+
+   for k in range(1,gfs_data["lev"]-1):
+      p[k,:,:] = p[k-1,:,:] - delp[k,:,:]
+
+   #Model top is 0mb -- using gfs_delp to calculate this will result in
+   #something else due to roundoff error
+   p[-1,:,:] = 0.0
+
+   #Add GFS pressures to the dict
+   gfs_data["p"] = p
+
+   return gfs_data
+
 def aida2gfs(aida_data, gfs_fname):
-   #Open the GFS netCDF file
+   #Open and read the GFS file
+   gfs_data = gfs_fname
    gfs_fh = nc.Dataset(gfs_fname, 'r+')
 
    #Get the three GFS grids (center, S, W)
@@ -145,7 +181,7 @@ def aida2gfs(aida_data, gfs_fname):
    #vs_i = vert_interp(vs_r, gfs_p, np.array(aida_data['p']))
 
    #Blend GFS and interpolated AI-DA solutions
-   #t_b = blend(t_i, gfs_p, gfs_in_t)
+   t_b = blend(t_i, gfs_p, gfs_in_t)
    #zh_b = blend(zh_i, gfs_p, gfs_in_zh)
    #uw_b = blend(uw_i, gfs_p, gfs_in_uw)
    #us_b = blend(us_i, gfs_p, gfs_in_us)
@@ -177,7 +213,7 @@ def aida2gfs(aida_data, gfs_fname):
 
    ps = out.createVariable("ps","f8",("lat","lon"))
    t = out.createVariable("t","f8",("lev","lat","lon"))
-   t_aida = out.createVariable("t_aida","f8",("aida_lev","lat","lon"))
+   t_aida = out.createVariable("t_aida","f8",("lev","lat","lon"))
    ps[:,:] = gfs_ps
    t[:,:,:] = t_i
    t_aida[:,:,:] = t_b
