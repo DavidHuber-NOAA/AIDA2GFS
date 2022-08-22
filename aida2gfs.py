@@ -145,7 +145,7 @@ def aida2gfs(aida_data, gfs_fname):
    #vs_i = vert_interp(vs_r, gfs_p, np.array(aida_data['p']))
 
    #Blend GFS and interpolated AI-DA solutions
-   t_b = blend(t_i, gfs_p, gfs_in_t)
+   #t_b = blend(t_i, gfs_p, gfs_in_t)
    #zh_b = blend(zh_i, gfs_p, gfs_in_zh)
    #uw_b = blend(uw_i, gfs_p, gfs_in_uw)
    #us_b = blend(us_i, gfs_p, gfs_in_us)
