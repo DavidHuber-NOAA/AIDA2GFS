@@ -11,7 +11,9 @@ aida = ds("exp004murz_pernak_predict_PREP_test_for_GFS.nc", "r")
 
 aida_out = aida.variables["tb_target"]
 aida_750_t = np.zeros([aida.dimensions['nx'].size, aida.dimensions['ny'].size])
-aida_750_t[:,:] = aida_out[0,::-1,:,0]
+aida_350_t = np.zeros([aida.dimensions['nx'].size, aida.dimensions['ny'].size])
+aida_750_t[:,:] = aida_out[0,::-1,:,3]
+aida_350_t[:,:] = aida_out[0,::-1,:,1]
 
 n_lat = aida.dimensions['nx'].size
 n_lon = aida.dimensions['ny'].size
@@ -25,8 +27,8 @@ map = plt.axes(projection=ccrs.PlateCarree())
 map.set_global()
 # # draw coastlines, country boundaries, fill continents.
 map.coastlines(linewidth=0.25)
-cs = map.contourf(lon,lat,aida_750_t,20,linewidths=1.5,transform=ccrs.PlateCarree())
-#cs = map.contour(lon,lat,aida_750_t,20,linewidths=1.5,transform=ccrs.PlateCarree())
+levels = np.linspace(240, 270, 20)
+cs = map.contourf(lon,lat,aida_750_t,levels=levels,transform=ccrs.PlateCarree())
 g1 = map.gridlines(crs=ccrs.PlateCarree(), draw_labels=True)
 g1.labels_top=False
 g1.labels_bottom=True
@@ -38,3 +40,21 @@ g1.yformatter = LATITUDE_FORMATTER
 plt.colorbar(cs)
 plt.title('750mb Temperature')
 plt.savefig("aida_750t.png")
+
+map2 = plt.axes(projection=ccrs.PlateCarree())
+map2.set_global()
+# # draw coastlines, country boundaries, fill continents.
+map2.coastlines(linewidth=0.25)
+levels = np.linspace(210, 240, 20)
+cs2 = map.contourf(lon,lat,aida_350_t,levels=levels,transform=ccrs.PlateCarree())
+g2 = map.gridlines(crs=ccrs.PlateCarree(), draw_labels=True)
+g2.labels_top=False
+g2.labels_bottom=True
+g2.labels_left=False
+g2.labels_right=True
+g2.xlines=False
+g2.xformatter = LONGITUDE_FORMATTER
+g2.yformatter = LATITUDE_FORMATTER
+plt.colorbar(cs)
+plt.title('350mb Temperature')
+plt.savefig("aida_350t.png")
