@@ -96,20 +96,19 @@ def get_gfs(gfs_in_fname):
    #Add GFS pressures to the dict
    gfs_data["p"] = p
 
+   #Add the remaining GFS quantities; eventually these will all be replaced by AIDA
+   var_names = ["zh","w", "zh", "t", "delp", "sphum", "liq_wat", "o3mr",
+                "ice_wat", "rainwat", "snowwat", "graupel", "u_w", "v_w",
+                "u_s", "v_s"]
+
+   for var in var_names:
+      gfs_data[var] = np.array(gfs_fh.variables[var])
+
    return gfs_data
 
-def aida2gfs(aida_data, gfs_fname):
+def aida2gfs(aida_data, gfs_fname, debug="no"):
    #Open and read the GFS file
-   gfs_data = gfs_fname
-   gfs_fh = nc.Dataset(gfs_fname, 'r+')
-
-   #Get the three GFS grids (center, S, W)
-   gfs_lat = np.array(gfs_fh.variables["geolat"])
-   gfs_lon = np.array(gfs_fh.variables["geolon"])
-   gfs_lat_w = np.array(gfs_fh.variables["geolat_w"])
-   gfs_lon_w = np.array(gfs_fh.variables["geolon_w"])
-   gfs_lat_s = np.array(gfs_fh.variables["geolat_s"])
-   gfs_lon_s = np.array(gfs_fh.variables["geolon_s"])
+   gfs_data = get_gfs(gfs_fname)
 
    ####
    #Regrid the AIDA data to the appropriate GFS grids
@@ -120,74 +119,39 @@ def aida2gfs(aida_data, gfs_fname):
    aida_lat = aida_data['lat']
    aida_lon = aida_data['lon']
    t_r = []
-   q_r = []
-   z_r = []
-   uw_r = []
-   vw_r = []
-   us_r = []
-   vs_r = []
 
    #Perform the regridding, one AIDA-level at a time, for each variable
-   for i in range(n_lev):
-      #TODO When running on a node, this could be split into 7 parallel tasks
-      t_r.append(interp_gfs_2_aida(gfs_lat,gfs_lon,aida_lat,aida_lon,aida_data['t'][i,:,:]))
-      #q_r.append(interp_gfs_2_aida(gfs_lat,gfs_lon,aida_lat,aida_lon,aida_data['q'][i,:,:]))
-      #z_r.append(interp_gfs_2_aida(gfs_lat,gfs_lon,aida_lat,aida_lon,aida_data['z'][i,:,:]))
-      #uw_r.append(interp_gfs_2_aida(gfs_lat_w,gfs_lon,aida_lat,aida_lon,aida_data['u'][i,:,:]))
-      #vw_r.append(interp_gfs_2_aida(gfs_lat_w,gfs_lon,aida_lat,aida_lon,aida_data['v'][i,:,:]))
-      #us_r.append(interp_gfs_2_aida(gfs_lat_s,gfs_lon,aida_lat,aida_lon,aida_data['u'][i,:,:]))
-      #vs_r.append(interp_gfs_2_aida(gfs_lat_s,gfs_lon,aida_lat,aida_lon,aida_data['v'][i,:,:]))
+   cen_var = ["q", "z"]
+   s_var = ["u","v"]
+   w_var = ["u","v"]
+   regrid_vars = {}
+   #Regrid all variables, one grid location at a time (center, southern, western)
+   for var_set, loc in zip([cen_var, s_var, w_var], ["","_s","_w"]):
+      (names, variables) = regrid_aida_2_gfs(gfs_data["geolat"],gfs_data["geolon"],
+            aida_lat,aida_lon,aida_data,var_set,loc)
 
-   t_r = np.array(t_r)
-   #q_r = np.array(q_r)
-   #z_r = np.array(z_r)
-   #uw_r = np.array(uw_r)
-   #vw_r = np.array(vw_r)
-   #us_r = np.array(us_r)
-   #vs_r = np.array(vs_r)
+      #Populate the regridded variables dictionary
+      for name, variable in zip(names,variables):
+         regrid_vars[name] = np.array(variable)
 
    ####
    #Perform vertical interpolation
    ####
 
-   #Construct pressure from surface pressure and del(pressure)
-   gfs_ps = np.array(gfs_fh.variables["ps"])
-   gfs_delp = np.array(gfs_fh.variables["delp"])
-   gfs_in_t = np.array(gfs_fh.variables["t"])
-   gfs_in_zh = np.array(gfs_fh.variables["zh"])
-   gfs_in_uw = np.array(gfs_fh.variables["u_w"])
-   gfs_in_us = np.array(gfs_fh.variables["u_s"])
-   gfs_in_vw = np.array(gfs_fh.variables["v_w"])
-   gfs_in_vs = np.array(gfs_fh.variables["v_s"])
-   gfs_in_q = np.array(gfs_fh.variables["sphum"])
-   gfs_p = np.zeros(gfs_delp.shape)
-   gfs_p[0,:,:] = gfs_ps[:,:] - gfs_delp[0,:,:]
-
-   for lev in range(1,gfs_delp.shape[0]-1):
-      gfs_p[lev,:,:] = gfs_p[lev-1,:,:] - gfs_delp[lev,:,:]
-
-   #Model top is 0mb -- using gfs_delp to calculate this will result in
-   #something else due to roundoff error
-   gfs_p[-1,:,:] = 0.0
-
    #Interpolate up to AIDA top on gfs vertical grid
-   aida_p = np.array(aida_data['p'])
-   t_i = vert_interp(t_r, gfs_p, np.array(aida_data['p']))
-   #q_i = vert_interp(q_r, gfs_p, np.array(aida_data['p']))
-   #z_i = vert_interp(z_r, gfs_p, np.array(aida_data['p']))
-   #uw_i = vert_interp(uw_r, gfs_p, np.array(aida_data['p']))
-   #vw_i = vert_interp(vw_r, gfs_p, np.array(aida_data['p']))
-   #us_i = vert_interp(us_r, gfs_p, np.array(aida_data['p']))
-   #vs_i = vert_interp(vs_r, gfs_p, np.array(aida_data['p']))
+   interp_vars = vert_interp(regrid_vars, gfs_data["p"])
+   #t_i = vert_interp(t_r, gfs_p, np.array(aida_data['p']))
 
    #Blend GFS and interpolated AI-DA solutions
-   t_b = blend(t_i, gfs_p, gfs_in_t)
-   #zh_b = blend(zh_i, gfs_p, gfs_in_zh)
-   #uw_b = blend(uw_i, gfs_p, gfs_in_uw)
-   #us_b = blend(us_i, gfs_p, gfs_in_us)
-   #vw_b = blend(vw_i, gfs_p, gfs_in_vs)
-   #vs_b = blend(vs_i, gfs_p, gfs_in_vs)
-   #q_b = blend(q_i, gfs_p, gfs_in_q)
+   blended_vars = blend(interp_vars, gfs_data)
+   #t_b = blend(t_i, gfs_p, gfs_in_t)
+
+   #Write out the new GFS input file
+   write_gfs(gfs_fname, gfs_data)
+
+   #Optionally, write out a debug file
+   if(debug.lower() == "yes" or debug.lower() == "true"):
+      write_debug(gfs_fname, gfs_data, aida_data)
 
    out = nc.Dataset("out_gfs.nc", 'w')
    lev = out.createDimension("lev", 128)
@@ -204,12 +168,12 @@ def aida2gfs(aida_data, gfs_fname):
    geolon = out.createVariable("geolon","f4",("lat","lon"))
    geolonw = out.createVariable("geolonw","f4",("lat","lonp"))
    geolons = out.createVariable("geolons","f4",("latp","lon"))
-   geolat[:,:] = gfs_lat
-   geolatw[:,:] = gfs_lat_w
-   geolats[:,:] = gfs_lat_s
-   geolon[:,:] = gfs_lon
-   geolonw[:,:] = gfs_lon_w
-   geolons[:,:] = gfs_lon_s
+   geolat[:,:] = gfs_data["geolat"]
+   geolatw[:,:] = gfs_data["geolat_w"]
+   geolats[:,:] = gfs_data["geolat_s"]
+   geolon[:,:] = gfs_data["geolon"]
+   geolonw[:,:] = gfs_data["geolon_w"]
+   geolons[:,:] = gfs_data["geolon_s"]
 
    ps = out.createVariable("ps","f8",("lat","lon"))
    t = out.createVariable("t","f8",("lev","lat","lon"))
@@ -227,24 +191,26 @@ def aida2gfs(aida_data, gfs_fname):
 
    out.close()
 
-def interp_gfs_2_aida(gfs_lat,gfs_lon,lat,lon,X):
+def regrid_aida_2_gfs(gfs_lat,gfs_lon,lat,lon,aida_data,var_list,ext):
 
-   #Transpose GFS lat/lon
-   Xt = np.transpose(X)
-   gfs_lont = np.transpose(gfs_lon)
-   gfs_latt = np.transpose(gfs_lat)
+   out_vars = []
+   out_names = [var_name + ext for var_name in var_list]
 
-   #Create an interpolation function
-   f = interp2d(lon, lat, X, kind='linear')
+   #Regrid each variable, one level at a time
+   for var in var_list:
+      X_gfs = np.zeros([aida_data[var].shape[0],gfs_lon.shape[0],gfs_lon.shape[1]]) - 999.0
+      for lev in range(aida_data["n_lev"]):
+         f = interp2d(lon, lat, aida_data[var][lev,:,:], kind='linear')
 
-   #There has to be a more efficient way to do this.  I just haven't figured it out yet
-   #Interpolate the AIDA data to the GFS grid points
-   X_gfs = np.zeros(gfs_lon.shape)
-   for i in range(gfs_lon.shape[0]):
-      for j in range(gfs_lon.shape[1]):
-         X_gfs[i, j] = f(gfs_lon[i,j], gfs_lat[i,j])
+         #There has to be a more efficient way to do this.  I just haven't figured it out yet.
+         #Interpolate the AIDA data to the GFS grid points
+         for i in range(gfs_lon.shape[0]):
+            for j in range(gfs_lon.shape[1]):
+               X_gfs[lev, i, j] = f(gfs_lon[i,j], gfs_lat[i,j])
 
-   return X_gfs
+      out_vars.append(X_gfs)
+
+   return (out_names, out_vars)
 
 def vert_interp(X_in,p,aida_p):
 
@@ -314,3 +280,11 @@ def blend(X_aida,p,X_gsi):
    X_out = np.where(X_out == -999.0, X_gsi, X_out)
 
    return X_out
+
+def write_gfs(in_fname, gfs_data):
+
+   return
+
+def write_debug(in_fname, gfs_data, aida_data):
+
+   return
