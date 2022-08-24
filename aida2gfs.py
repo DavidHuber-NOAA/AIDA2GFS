@@ -139,7 +139,7 @@ def aida2gfs(aida_data, gfs_fname, debug="no"):
    ####
 
    #Interpolate up to AIDA top on gfs vertical grid
-   interp_vars = vert_interp(regrid_vars, gfs_data["p"])
+   interp_vars = vert_interp(regrid_vars, gfs_data["p"], aida_data['p'])
    #t_i = vert_interp(t_r, gfs_p, np.array(aida_data['p']))
 
    #Blend GFS and interpolated AI-DA solutions
@@ -212,7 +212,10 @@ def regrid_aida_2_gfs(gfs_lat,gfs_lon,lat,lon,aida_data,var_list,ext):
 
    return (out_names, out_vars)
 
-def vert_interp(X_in,p,aida_p):
+def vert_interp(dict_in,p,aida_p):
+
+   #Initialize the output dict
+   dict_out = {}
 
    #Calculate log(p) for AIDA and gfs
    #ptop is 0mb, so just set it to a large negative
@@ -222,39 +225,45 @@ def vert_interp(X_in,p,aida_p):
 
    aida_logp = np.log(aida_p)
 
-   #Assign AIDA indices to each GFS point
+   #Assign AIDA indices to each GFS point; i.e. what AIDA point is below each GFS point based on pressure
    n_aida = len(aida_p)
    AIDA_ndx = np.zeros(p.shape) - 1
    for i in range(n_aida-2,-1,-1):
       AIDA_ndx = np.where(AIDA_ndx == -1, np.where((p > aida_p[i]) & (p <= aida_p[i+1]), i, AIDA_ndx), AIDA_ndx)
 
-   #Preassign interpolation pressures and Xs
-   P0 = np.zeros(p.shape) - 999.0
-   P1 = np.zeros(p.shape) - 999.0
-   X0 = np.zeros(p.shape) - 999.0
-   X1 = np.zeros(p.shape) - 999.0
-   for i in range(n_aida-1):
-      P0 = np.where(AIDA_ndx == i, aida_logp[i], P0)
-      P1 = np.where(AIDA_ndx == i, aida_logp[i+1], P1)
-      for j in range(p.shape[0]):
-         X0[j,:,:] = np.where(AIDA_ndx[j,:,:] == i, X_in[i,:,:], X0[j,:,:])
-         X1[j,:,:] = np.where(AIDA_ndx[j,:,:] == i, X_in[i+1,:,:], X1[j,:,:])
+   #Iterate through the input 3d arrays and interpolate to the GFS vertical grid
+   for key, X_in in dict_in.items():
+      #Preassign interpolation pressures and Xs based on AIDA_ndx
+      P0 = np.zeros(p.shape) - 999.0
+      P1 = np.zeros(p.shape) - 999.0
+      X0 = np.zeros(p.shape) - 999.0
+      X1 = np.zeros(p.shape) - 999.0
 
-   #Interpolate the quantity for each GFS point, stopping at AIDA top
-   X_out = np.zeros(p.shape) - 999.0
-   valid = np.where(AIDA_ndx != -1)
-   X_out[valid] = X0[valid] + ((X1[valid] - X0[valid]) * (gfs_logp[valid] - P0[valid])) / (P1[valid] - P0[valid])
+      #Locate 
+      for i in range(n_aida-1):
+         P0 = np.where(AIDA_ndx == i, aida_logp[i], P0)
+         P1 = np.where(AIDA_ndx == i, aida_logp[i+1], P1)
+         for j in range(p.shape[0]):
+            X0[j,:,:] = np.where(AIDA_ndx[j,:,:] == i, X_in[i,:,:], X0[j,:,:])
+            X1[j,:,:] = np.where(AIDA_ndx[j,:,:] == i, X_in[i+1,:,:], X1[j,:,:])
 
-   return X_out
+      #Interpolate the quantity for each GFS point, stopping at AIDA top
+      X_out = np.zeros(p.shape) - 999.0
+      valid = np.where(AIDA_ndx != -1)
+      X_out[valid] = X0[valid] + ((X1[valid] - X0[valid]) * (gfs_logp[valid] - P0[valid])) / (P1[valid] - P0[valid])
+
+      dict_out[key] = X_out
+
+   return dict_out
 
 
-def blend(X_aida,p,X_gsi):
+def blend(X_aida,p,X_gfs):
 
    #The column data in X_aida will be like [-999,...,-999,valid,...,valid,-999,...]
-   #We will blend the GSI and AIDA solutions from the first valid point
-   #to 50mb above that point.  Similarly, blend the GSI and AIDA solutions from the
+   #We will blend the input GFS and AIDA solutions from the first valid point
+   #to 50mb above that point.  Similarly, blend the GFS and AIDA solutions from the
    #top valid point to 50mb below.  Lastly, assign all invalid (-999) points with
-   #the GSI solution.
+   #the GFS solution.
    (d0, d1, d2) = X_aida.shape
    X_out = X_aida
    for i in range(d1):
@@ -268,16 +277,16 @@ def blend(X_aida,p,X_gsi):
          bot_top = np.where(p_sub_top > 0.0 )[0][-1] + bot + 1
          for k in range(bot,bot_top+1):
             X_out[k,i,j] = (X_aida[k,i,j] * (p[bot,i,j] - p[k,i,j]) + 
-                            X_gsi[k,i,j] * (5000.0 - (p[bot,i,j] - p[k,i,j]))) / 5000.0
+                            X_gfs[k,i,j] * (5000.0 - (p[bot,i,j] - p[k,i,j]))) / 5000.0
 
          p_sub_bot = p[:top,i,j] - p[top,i,j] - 5000.0
          top_bot = np.where(p_sub_bot < 0.0)[0][0]
          for k in range(top_bot,top+1):
             X_out[k,i,j] = (X_aida[k,i,j] * (p[k,i,j] - p[top,i,j]) + 
-                            X_gsi[k,i,j] * (5000.0 - (p[k,i,j] - p[top,i,j]))) / 5000.0
+                            X_gfs[k,i,j] * (5000.0 - (p[k,i,j] - p[top,i,j]))) / 5000.0
 
-   #Lastly, fill in the remaining locations with the GSI solution
-   X_out = np.where(X_out == -999.0, X_gsi, X_out)
+   #Lastly, fill in the remaining locations with the GFS solution
+   X_out = np.where(X_out == -999.0, X_gfs, X_out)
 
    return X_out
 
