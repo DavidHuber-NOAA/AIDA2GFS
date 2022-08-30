@@ -65,6 +65,7 @@ def get_aida(aida_out_fname):
 
 def get_gfs(gfs_in_fname):
 
+   #TODO Fix vertical ordering (I assumed index 0 was the surface, when it was actually TOA)
    #Open the GFS input file
    gfs_fh = nc.Dataset(gfs_in_fname, 'r')
 
