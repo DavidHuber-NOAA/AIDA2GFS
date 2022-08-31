@@ -26,19 +26,19 @@ def get_aida(aida_out_fname):
    u = np.zeros((n_lev,n_lat,n_lon))
    v = np.zeros((n_lev,n_lat,n_lon))
    t = np.zeros((n_lev,n_lat,n_lon))
-   q = np.zeros((n_lev,n_lat,n_lon))
-   z = np.zeros((n_lev,n_lat,n_lon))
+   sphum = np.zeros((n_lev,n_lat,n_lon))
+   zh = np.zeros((n_lev,n_lat,n_lon))
 
    #Read in the arrays; aida_data goes from 90 to -90
    for i in range(n_lev):
       t[i,:,:-1] = aida_out[0,::-1,:,n_lev*0+i]
       t[i,:,-1] = t[i,:,0]
 
-      q[i,:,:-1] = aida_out[0,::-1,:,n_lev*1+i]
-      q[i,:,-1] = q[i,:,0]
+      sphum[i,:,:-1] = aida_out[0,::-1,:,n_lev*1+i]
+      sphum[i,:,-1] = sphum[i,:,0]
 
-      z[i,:,:-1] = aida_out[0,::-1,:,n_lev*2+i]
-      z[i,:,-1] = z[i,:,0]
+      zh[i,:,:-1] = aida_out[0,::-1,:,n_lev*2+i]
+      zh[i,:,-1] = zh[i,:,0]
 
       u[i,:,:-1] = aida_out[0,::-1,:,n_lev*3+i]
       u[i,:,-1] = u[i,:,0]
@@ -58,8 +58,8 @@ def get_aida(aida_out_fname):
             'u' : u,
             'v' : v,
             't' : t,
-            'q' : q,
-            'z' : z }
+            'sphum' : sphum,
+            'zh' : zh }
 
    return aida_data
 
@@ -98,7 +98,7 @@ def get_gfs(gfs_in_fname):
    gfs_data["p"] = p
 
    #Add the remaining GFS quantities; eventually these will all be replaced by AIDA
-   var_names = ["zh","w", "zh", "t", "delp", "sphum", "liq_wat", "o3mr",
+   var_names = ["w", "zh", "t", "delp", "sphum", "liq_wat", "o3mr",
                 "ice_wat", "rainwat", "snowwat", "graupel", "u_w", "v_w",
                 "u_s", "v_s"]
 
@@ -122,18 +122,31 @@ def aida2gfs(aida_data, gfs_fname, debug="no"):
    t_r = []
 
    #Perform the regridding, one AIDA-level at a time, for each variable
-   cen_var = ["q", "z"]
+   cen_var = ["sphum", "zh"]
    s_var = ["u","v"]
    w_var = ["u","v"]
    regrid_vars = {}
-   #Regrid all variables, one grid location at a time (center, southern, western)
+   #Regrid all AIDA variables to the GFS grid, one grid location at a time (center, southern, western)
    for var_set, loc in zip([cen_var, s_var, w_var], ["","_s","_w"]):
-      (names, variables) = regrid_aida_2_gfs(gfs_data["geolat"],gfs_data["geolon"],
+      if("_s" in loc):
+         (names, variables) = regrid(gfs_data["geolat_s"],gfs_data["geolon_s"],
+            aida_lat,aida_lon,aida_data,var_set,loc)
+      elif("_w" in loc):
+         (names, variables) = regrid(gfs_data["geolat_w"],gfs_data["geolon_w"],
+            aida_lat,aida_lon,aida_data,var_set,loc)
+      else:
+         (names, variables) = regrid(gfs_data["geolat"],gfs_data["geolon"],
             aida_lat,aida_lon,aida_data,var_set,loc)
 
       #Populate the regridded variables dictionary
       for name, variable in zip(names,variables):
          regrid_vars[name] = np.array(variable)
+
+   #Now regrid GFS pressure to the southern and western grids, one altitude at a time
+   for var_set, loc in zip([cen_var, s_var, w_var], ["","_s","_w"]):
+      if("_s" in loc):
+         (names, variables) = regrid(gfs_data["geolat_s"],gfs_data["geolon_s"],
+            aida_lat,aida_lon,aida_data,var_set,loc)
 
    ####
    #Perform vertical interpolation
@@ -192,22 +205,29 @@ def aida2gfs(aida_data, gfs_fname, debug="no"):
 
    out.close()
 
-def regrid_aida_2_gfs(gfs_lat,gfs_lon,lat,lon,aida_data,var_list,ext):
+def regrid(regrid_lat,regrid_lon,in_lat,in_lon,input_data,var_list,ext):
+
+   #Regrids the variables in the input_data dict specified by var_list.  The
+   #variables should be registered on the in_lat and in_lon grid and will be
+   #regridded to the regrid_lat and regrid_lon grid by bilinear interpolation.
+   #
+   #It is assumed that in_lat and in_lon are 1-d while regrid_lat and regrid_lon
+   #are 2-d.  If not, they will be reshaped (TODO).
 
    out_vars = []
    out_names = [var_name + ext for var_name in var_list]
 
    #Regrid each variable, one level at a time
    for var in var_list:
-      X_gfs = np.zeros([aida_data[var].shape[0],gfs_lon.shape[0],gfs_lon.shape[1]]) - 999.0
-      for lev in range(aida_data["n_lev"]):
-         f = interp2d(lon, lat, aida_data[var][lev,:,:], kind='linear')
+      X_gfs = np.zeros([input_data[var].shape[0],regrid_lon.shape[0],regrid_lon.shape[1]]) - 999.0
+      for lev in range(input_data["n_lev"]):
+         f = interp2d(in_lon, in_lat, input_data[var][lev,:,:], kind='linear')
 
          #There has to be a more efficient way to do this.  I just haven't figured it out yet.
          #Interpolate the AIDA data to the GFS grid points
-         for i in range(gfs_lon.shape[0]):
-            for j in range(gfs_lon.shape[1]):
-               X_gfs[lev, i, j] = f(gfs_lon[i,j], gfs_lat[i,j])
+         for i in range(regrid_lon.shape[0]):
+            for j in range(regrid_lon.shape[1]):
+               X_gfs[lev, i, j] = f(regrid_lon[i,j], regrid_lat[i,j])
 
       out_vars.append(X_gfs)
 
@@ -234,6 +254,7 @@ def vert_interp(dict_in,p,aida_p):
 
    #Iterate through the input 3d arrays and interpolate to the GFS vertical grid
    for key, X_in in dict_in.items():
+      print(key)
       #Preassign interpolation pressures and Xs based on AIDA_ndx
       P0 = np.zeros(p.shape) - 999.0
       P1 = np.zeros(p.shape) - 999.0
@@ -258,38 +279,50 @@ def vert_interp(dict_in,p,aida_p):
    return dict_out
 
 
-def blend(X_aida,p,X_gfs):
+def blend(interp_vars,gfs_data,blend_range=5000):
 
    #The column data in X_aida will be like [-999,...,-999,valid,...,valid,-999,...]
    #We will blend the input GFS and AIDA solutions from the first valid point
-   #to 50mb above that point.  Similarly, blend the GFS and AIDA solutions from the
-   #top valid point to 50mb below.  Lastly, assign all invalid (-999) points with
+   #to X Pa (5000 by default) above that point.  Similarly, blend the GFS and AIDA solutions from the
+   #top valid point to blend_range Pa below.  Lastly, assign all invalid (-999) points with
    #the GFS solution.
-   (d0, d1, d2) = X_aida.shape
-   X_out = X_aida
-   for i in range(d1):
-      for j in range(d2):
-         #Find the top and bottom valid indices for each grid point
-         bot = np.where(X_aida[:,i,j] != -999.0)[0][0]
-         top = np.where(X_aida[:,i,j] != -999.0)[0][-1]
+   blended_vars = {}
+   p = gfs_data['p']
+   for key, X_aida in interp_vars.items():
+      (d0, d1, d2) = X_aida.shape
+      X_out = X_aida
+      print(key)
+      #Do not blend geopotential height
+      #TODO Estimate pressure at zh (half) levels
+      if(key == "zh"):
+         blended_vars['zh'] = X_out
+         continue
+      X_gfs = gfs_data[key]
+      for i in range(d1):
+         for j in range(d2):
+            #Find the top and bottom valid indices for each grid point
+            bot = np.where(X_aida[:,i,j] != -999.0)[0][0]
+            top = np.where(X_aida[:,i,j] != -999.0)[0][-1]
 
-         #Blend the bottom to 50mb above
-         p_sub_top = p[bot+1:,i,j] - p[bot,i,j] + 5000.0
-         bot_top = np.where(p_sub_top > 0.0 )[0][-1] + bot + 1
-         for k in range(bot,bot_top+1):
-            X_out[k,i,j] = (X_aida[k,i,j] * (p[bot,i,j] - p[k,i,j]) + 
-                            X_gfs[k,i,j] * (5000.0 - (p[bot,i,j] - p[k,i,j]))) / 5000.0
+            #Blend the bottom to blend_range Pa above
+            p_sub_top = p[bot+1:,i,j] - p[bot,i,j] + blend_range
+            bot_top = np.where(p_sub_top > 0.0 )[0][-1] + bot + 1
+            for k in range(bot,bot_top+1):
+               X_out[k,i,j] = (X_aida[k,i,j] * (p[bot,i,j] - p[k,i,j]) + 
+                            X_gfs[k,i,j] * (blend_range - (p[bot,i,j] - p[k,i,j]))) / blend_range
 
-         p_sub_bot = p[:top,i,j] - p[top,i,j] - 5000.0
-         top_bot = np.where(p_sub_bot < 0.0)[0][0]
-         for k in range(top_bot,top+1):
-            X_out[k,i,j] = (X_aida[k,i,j] * (p[k,i,j] - p[top,i,j]) + 
-                            X_gfs[k,i,j] * (5000.0 - (p[k,i,j] - p[top,i,j]))) / 5000.0
+            p_sub_bot = p[:top,i,j] - p[top,i,j] - blend_range
+            top_bot = np.where(p_sub_bot < 0.0)[0][0]
+            for k in range(top_bot,top+1):
+               X_out[k,i,j] = (X_aida[k,i,j] * (p[k,i,j] - p[top,i,j]) + 
+                            X_gfs[k,i,j] * (blend_range - (p[k,i,j] - p[top,i,j]))) / blend_range
 
-   #Lastly, fill in the remaining locations with the GFS solution
-   X_out = np.where(X_out == -999.0, X_gfs, X_out)
+      #Lastly, fill in the remaining locations with the GFS solution
+      X_out = np.where(X_out == -999.0, X_gfs, X_out)
 
-   return X_out
+      blended_vars[key] = X_out
+
+   return blended_vars
 
 def write_gfs(in_fname, gfs_data):
 
