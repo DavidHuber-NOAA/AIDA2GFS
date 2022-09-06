@@ -10,10 +10,10 @@ from cartopy.mpl.gridliner import LONGITUDE_FORMATTER, LATITUDE_FORMATTER
 out = ds("out_gfs.nc", "r")
 gfs_lat = np.array(out.variables["geolat"])
 gfs_lon = np.array(out.variables["geolon"])
-#AIDA pressure level temperature horizontally interpolated to GFS grid
-interp_250_t = np.array(out.variables["t_aida"][0,:,:])
-interp_350_t = np.array(out.variables["t_aida"][1,:,:])
-interp_t = np.array(out.variables["t_aida"])
+#AIDA pressure level temperature regridded to GFS grid
+regrid_250_t = np.array(out.variables["t_r"][0,:,:])
+regrid_350_t = np.array(out.variables["t_r"][1,:,:])
+regrid_t = np.array(out.variables["t_r"])
 #AIDA-derived input
 gfs_t = np.array(out.variables["t"])
 
@@ -45,7 +45,7 @@ for i in range(p.shape[1]):
       denom = logp[ndx_350[i,j],i,j] - logp[ndx_350[i,j]-1,i,j]
       gfs_int_350_t[i,j] = gfs_t[ndx_350[i,j]-1,i,j] + numer / denom
 
-diff_350_t = gfs_int_350_t - interp_350_t
+diff_350_t = gfs_int_350_t - regrid_350_t
 max_ndx = np.unravel_index(np.argmax(diff_350_t), diff_350_t.shape)
 p_aida = [25000, 35000, 50000, 75000]
 
@@ -60,7 +60,7 @@ map.coastlines(linewidth=0.25)
 # # contour data over the map.
 gfs_lon = np.where(gfs_lon > 180.0, gfs_lon - 360.0, gfs_lon)
 levels = np.linspace(200, 240, 21)
-cs = map.contourf(gfs_lon,gfs_lat,interp_250_t,levels=levels,transform=ccrs.PlateCarree())
+cs = map.contourf(gfs_lon,gfs_lat,regrid_250_t,levels=levels,transform=ccrs.PlateCarree())
 #g1 = map.gridlines(crs=ccrs.PlateCarree(), draw_labels=True)
 #g1 = map.gridlines(crs=ccrs.PlateCarree(), draw_labels=True)
 #g1.labels_top=False
@@ -72,7 +72,7 @@ cs = map.contourf(gfs_lon,gfs_lat,interp_250_t,levels=levels,transform=ccrs.Plat
 #g1.yformatter = LATITUDE_FORMATTER
 plt.colorbar(cs, fraction=0.046, pad=0.04)
 plt.title('250mb Temperature')
-plt.savefig("interp_250t.png")
+plt.savefig("regrid_250t.png")
 plt.close('all')
 
 map_350 = plt.axes(projection=ccrs.PlateCarree())
@@ -84,10 +84,10 @@ levels = np.linspace(230, 270, 21)
 cs2 = map_350.contourf(gfs_lon,gfs_lat,gfs_int_350_t,levels=levels,transform=ccrs.PlateCarree())
 plt.colorbar(cs2, fraction=0.026, pad=0.04)
 plt.title('350mb Temperature')
-plt.savefig("interp_350t.png")
+plt.savefig("regrid_350t.png")
 plt.close('all')
 
-diff_350_t = gfs_int_350_t - interp_350_t
+diff_350_t = gfs_int_350_t - regrid_350_t
 map_diff = plt.axes(projection=ccrs.PlateCarree())
 map_diff.set_global()
 # # draw coastlines, country boundaries, fill continents.
@@ -258,7 +258,7 @@ ax = fig.add_subplot(111,projection='skewx')
 
 plt.grid(True)
 ax.semilogy(gfs_t[:,0,129], p[:,0,129]/100.0, color='C2', label = 'GFS Grid')
-ax.semilogy(interp_t[:,0,129], [n/100.0 for n in p_aida], linestyle = '--', marker='o', color='C3', label = 'AI-DA Grid')
+ax.semilogy(regrid_t[:,0,129], [n/100.0 for n in p_aida], linestyle = '--', marker='o', color='C3', label = 'AI-DA Grid')
 
 # Disables the log-formatting that comes with semilogy
 ax.yaxis.set_major_formatter(ScalarFormatter())
