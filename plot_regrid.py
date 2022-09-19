@@ -4,10 +4,18 @@ import numpy as np
 from netCDF4 import Dataset as ds
 import cartopy.crs as ccrs
 import cartopy.feature as cf
+import matplotlib
+matplotlib.use("Agg",force=True)
 from matplotlib import pyplot as plt
 from cartopy.mpl.gridliner import LONGITUDE_FORMATTER, LATITUDE_FORMATTER
 
+print("Open file")
 out = ds("out_gfs.nc", "r")
+in_gfs = ds("gfs_data/gfs_data.tile1.nc", "r")
+out_gsi = ds("gsi_output/gfs.t18z.atmanl.nemsio.nc4", "r")
+in_ctrl = ds("gfs_ctrl.nc","r")
+p0 = in_ctrl["vcoord"][0,1]
+print("Read contents")
 gfs_lat = np.array(out.variables["geolat"])
 gfs_lon = np.array(out.variables["geolon"])
 #AIDA pressure level temperature regridded to GFS grid
@@ -15,17 +23,50 @@ regrid_250_t = np.array(out.variables["t_r"][0,:,:])
 regrid_350_t = np.array(out.variables["t_r"][1,:,:])
 regrid_t = np.array(out.variables["t_r"])
 #AIDA-derived input
-gfs_t = np.array(out.variables["t"])
+final_t = np.array(out.variables["t"])
+#Original input
+orig_t = np.array(in_gfs.variables["t"])
+#GSI output
+[gsi_t] = np.array(out_gsi.variables["tmpmidlayer"])
+#GSI lat/lon
+gsi_lat = np.array(out_gsi.variables["lat"])
+gsi_lon = np.array(out_gsi.variables["lon"])
+
+#GFS lat/lon indexes of interest
+x_ndx = 0
+y_ndx = 129
+
+#Find closest point in the GSI input
+dist = 999.0
+for i in range(gsi_lat.shape[0]):
+   if(abs(gsi_lat[i] - gfs_lat[x_ndx,y_ndx]) > 0.5):
+      continue
+   for j in range(gsi_lon.shape[0]):
+      test_dist = np.sqrt((gsi_lat[i] - gfs_lat[x_ndx,y_ndx]) ** 2 + 
+                           (gsi_lon[j] - gfs_lon[x_ndx,y_ndx]) ** 2)
+      if(test_dist < dist):
+         dist = test_dist
+         gsi_x = i
+         gsi_y = j
 
 ps = out.variables["ps"]
 delp = out.variables["delp"]
+p_int = np.zeros([delp.shape[0]+1,delp.shape[1],delp.shape[2]])
 p = np.zeros(delp.shape)
 #Construct GFS pressure
-p[0,:,:] = ps[:,:] - delp[0,:,:]
-for lev in range(1,delp.shape[0]-1):
-   p[lev,:,:] = p[lev-1,:,:] - delp[lev,:,:]
+for k in range(1,p_int.shape[0]):
+   p_int[k,:,:] = p_int[k-1,:,:] + delp[k-1,:,:]
+   p[k-1,:,:] = (p_int[k-1,:,:] + p_int[k,:,:]) * 0.5
 
-p[-1,:,:] = 0.0
+#Construct GSI pressure
+[gsi_ps] = np.array(out_gsi.variables["pressfc"])
+[gsi_delp] = np.array(out_gsi.variables["dpresmidlayer"])
+gsi_p_int = np.zeros([gsi_delp.shape[0]+1,gsi_delp.shape[1],gsi_delp.shape[2]])
+gsi_p = np.zeros(gsi_delp.shape)
+#Construct GFS pressure
+for k in range(gsi_p_int.shape[0]-2, -1, -1):
+   gsi_p_int[k,:,:] = gsi_p_int[k+1,:,:] + gsi_delp[k,:,:]
+   gsi_p[k,:,:] = (gsi_p_int[k+1,:,:] + gsi_p_int[k,:,:]) * 0.5
 
 #Find the 350mb indexes
 p_t = p - 35000
@@ -33,6 +74,7 @@ p_t = np.where(p_t < 0.0, -999999999.0, p)
 ndx_350 = np.argmin(p_t, axis=0)
 
 #Interpolate for temperature based on ndx_350
+print("Interpolate for temperature")
 gfs_int_350_t = np.zeros(p.shape[1:])
 a = np.where(p > 0.0, p, -999)
 subset = np.where(p > 0.0)
@@ -41,10 +83,11 @@ logp[subset] = np.log(p[subset])
 log_350 = np.log(35000.0)
 for i in range(p.shape[1]):
    for j in range(p.shape[2]):
-      numer = (gfs_t[ndx_350[i,j],i,j] - gfs_t[ndx_350[i,j]-1,i,j]) * (log_350-logp[ndx_350[i,j]-1,i,j])
-      denom = logp[ndx_350[i,j],i,j] - logp[ndx_350[i,j]-1,i,j]
-      gfs_int_350_t[i,j] = gfs_t[ndx_350[i,j]-1,i,j] + numer / denom
+      numer = (final_t[ndx_350[i,j],i,j] - final_t[ndx_350[i,j]+1,i,j]) * (log_350-logp[ndx_350[i,j]+1,i,j])
+      denom = logp[ndx_350[i,j],i,j] - logp[ndx_350[i,j]+1,i,j]
+      gfs_int_350_t[i,j] = final_t[ndx_350[i,j]+1,i,j] + numer / denom
 
+print("Done interpolating")
 diff_350_t = gfs_int_350_t - regrid_350_t
 max_ndx = np.unravel_index(np.argmax(diff_350_t), diff_350_t.shape)
 p_aida = [25000, 35000, 50000, 75000]
@@ -53,6 +96,7 @@ p_aida = [25000, 35000, 50000, 75000]
 # # perspective of satellite looking down at 50N, 100W.
 # # use low resolution coastlines.
 
+print("Plot regridded 250mb temperature")
 map = plt.axes(projection=ccrs.PlateCarree())
 map.set_global()
 # # draw coastlines, country boundaries, fill continents.
@@ -75,6 +119,7 @@ plt.title('250mb Temperature')
 plt.savefig("regrid_250t.png")
 plt.close('all')
 
+print("plot 350mb interpolated temperatures")
 map_350 = plt.axes(projection=ccrs.PlateCarree())
 map_350.set_global()
 # # draw coastlines, country boundaries, fill continents.
@@ -111,6 +156,7 @@ plt.close('all')
 
 
 
+print("Define skew-t")
 ############################################################
 #skew-t log(p) classes and functions
 # The sole purpose of this class is to look at the upper, lower, or total
@@ -250,6 +296,7 @@ register_projection(SkewXAxes)
 
 
 
+print("Plot skew-t")
 ####################################################
 #Now plot skew-t log(p) plots
 
@@ -257,19 +304,22 @@ fig = plt.figure(figsize=(6.5875, 6.2125))
 ax = fig.add_subplot(111,projection='skewx')
 
 plt.grid(True)
-ax.semilogy(gfs_t[:,0,129], p[:,0,129]/100.0, color='C2', label = 'GFS Grid')
-ax.semilogy(regrid_t[:,0,129], [n/100.0 for n in p_aida], linestyle = '--', marker='o', color='C3', label = 'AI-DA Grid')
+ax.semilogy(final_t[:,0,129], p[:,0,129]/100.0, color='C2', label = 'Vert. Interp. & Blended AI-DA')
+ax.semilogy(regrid_t[:,0,129], [n/100.0 for n in p_aida], linestyle = '--', marker='o', color='C3', label = 'AI-DA In GFS Grid')
+ax.semilogy(orig_t[:,0,129], p[:,0,129]/100.0, color='C4', label = "Orig Input")
+ax.semilogy(gsi_t[:,gsi_x,gsi_y], (gsi_p[:,gsi_x,gsi_y]/100.0), color='b', label = "GSI Output")
+print(gsi_p[0,gsi_x,gsi_y], gsi_ps[gsi_x,gsi_y],p[-1,0,129], ps[0,129])
 
 # Disables the log-formatting that comes with semilogy
 ax.yaxis.set_major_formatter(ScalarFormatter())
 ax.yaxis.set_minor_formatter(NullFormatter())
 ax.set_yticks(np.linspace(100, 1000, 10))
-ax.set_ylim(760, 240)
+ax.set_ylim(1030, 100)
 
 ax.xaxis.set_major_locator(MultipleLocator(10))
-ax.set_xlim(230,265)
+ax.set_xlim(230,285)
 ax.legend()
 
-plt.title('Vertically interpolated temperature')
+plt.title('Temperature (K)')
 plt.savefig("skew_t.png")
 plt.close('all')
