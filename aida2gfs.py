@@ -3,6 +3,8 @@ from scipy.interpolate import interp2d
 import xarray as xr
 import numpy as np
 import xesmf as xe
+from os import mkdir
+from os.path import isdir
 
 def get_aida(aida_out_fname):
 
@@ -82,12 +84,15 @@ def get_gfs(gfs_in_fname, ctrl_fname):
          'lon'  : gfs_fh.dimensions["lon"].size,
          'levp' : gfs_fh.dimensions["levp"].size,
          'latp' : gfs_fh.dimensions["latp"].size,
-         'lonp' : gfs_fh.dimensions["lonp"].size }
+         'lonp' : gfs_fh.dimensions["lonp"].size,
+         'ntracer' : gfs_fh.dimensions["ntracer"].size}
 
    #Read all data into numpy arrays and add to the dictionary
    for name,var in gfs_fh.variables.items():
       gfs_data[name] = np.array(var)
 
+   #Read 'source' global attribute
+   gfs_data["source"] = gfs_fh.source
    # Construct pressure and add it to the dictionary
    # delp is the thickness of each layer.  The center is pressure weighted mean at the edges:
    # p_center = (P2 - P1)/log(P2/P1), P2 > P1
@@ -106,16 +111,17 @@ def get_gfs(gfs_in_fname, ctrl_fname):
 
    return gfs_data
 
-def aida2gfs(aida_data, gfs_fname, ctrl_fname, debug="no"):
+def aida2gfs(aida_data, gfs_fname, ctrl_fname, debug="no", do_blend="no"):
    #Open and read the GFS file and control file
+   print("Read in GFS data from " + gfs_fname)
    gfs_data = get_gfs(gfs_fname, ctrl_fname)
 
    ####
    #Regrid the AIDA data to the appropriate GFS grids
    ####
 
+   print("Regrid data")
    #Create regridded arrays (_r for regridded)
-   aida_nlev = aida_data["lev"]
    aida_geolat = aida_data['geolat']
    aida_geolon = aida_data['geolon']
    t_r = []
@@ -152,18 +158,35 @@ def aida2gfs(aida_data, gfs_fname, ctrl_fname, debug="no"):
    #Perform vertical interpolation
    ####
 
+   print("Interpolate AIDA data to GFS grid")
    #Interpolate up to AIDA top on gfs vertical grid
    interp_vars = vert_interp(regrid_vars, gfs_data, aida_data['p'])
 
    #Blend GFS and interpolated AI-DA solutions
-   blended_vars = blend(interp_vars, gfs_data)
+   if(do_blend.lower() == "yes"):
+      print("Blend AIDA data at upper and lower boundaries")
+      blended_vars = blend(interp_vars, gfs_data)
+   else:
+      #Do not blend, but do combine.  blend_range=0mb
+      print("Combine AIDA and input GFS data")
+      interp_vars = blend(interp_vars, gfs_data, blend_range = 0)
+
+   if(do_blend.lower() == "yes"):
+      final_vars = blended_vars
+   else:
+      final_vars = interp_vars
 
    #Write out the new GFS input file
-   write_gfs(gfs_fname, gfs_data)
+   print("Write AIDA data to a new GFS netCDF4 file")
+   write_gfs(gfs_fname, gfs_data, final_vars)
 
    #Optionally, write out a debug file
    if(debug.lower() == "yes" or debug.lower() == "true"):
-      write_debug(gfs_fname, gfs_data, aida_data)
+      print("Write debug file")
+      if(do_blend.lower() == 'yes'):
+         write_debug(gfs_fname, gfs_data, aida_data, regrid_vars, interp_vars, blended_vars, final_vars)
+      else:
+         write_debug(gfs_fname, gfs_data, aida_data, regrid_vars, interp_vars, final_vars, final_vars)
 
    return
 
@@ -276,18 +299,20 @@ def vert_interp(dict_in,gfs_data,aida_p):
    #Initialize the output dict
    dict_out = {}
 
-   #Calculate log(p) for AIDA and gfs (at center, southern, and western grid points)
-   (p_c, p_s, p_w) = (np.array(gfs_data["p"]), np.array(gfs_data["p_s"]), np.array(gfs_data["p_w"]))
+   #Calculate log(p) for AIDA and gfs (at center, southern, western, and interface grid points)
+   (p_c, p_s, p_w, p_i) = (np.array(gfs_data["p"]), np.array(gfs_data["p_s"]),
+                           np.array(gfs_data["p_w"]), np.array(gfs_data["p_int"]))
    #Now calculate logs for each pressure set
-   (gfs_logp_c, gfs_logp_s, gfs_logp_w) = (
-         np.zeros(p_c.shape), np.zeros(p_s.shape), np.zeros(p_w.shape))
+   (gfs_logp_c, gfs_logp_s, gfs_logp_w, gfs_logp_i) = (np.zeros(p_c.shape), np.zeros(p_s.shape), np.zeros(p_w.shape), np.zeros(p_i.shape))
    gfs_logp_s[1:,:,:] = np.log(p_s[1:,:,:])
    gfs_logp_w[1:,:,:] = np.log(p_w[1:,:,:])
    gfs_logp_c[1:,:,:] = np.log(p_c[1:,:,:])
+   gfs_logp_i[1:,:,:] = np.log(p_i[1:,:,:])
    #ptop is 0mb, so just set it to a large negative
    gfs_logp_c[0,:,:] = -999.0
    gfs_logp_s[0,:,:] = -999.0
    gfs_logp_w[0,:,:] = -999.0
+   gfs_logp_i[0,:,:] = -999.0
 
    #Now take the log of AI-DA's pressure
    aida_logp = np.log(aida_p)
@@ -303,6 +328,9 @@ def vert_interp(dict_in,gfs_data,aida_p):
       elif("_w" in key):
          p = p_w
          gfs_logp = gfs_logp_w
+      elif(key == "zh"):
+         p = p_i
+         gfs_logp = gfs_logp_i
       else:
          p = p_c
          gfs_logp = gfs_logp_c
@@ -358,25 +386,26 @@ def blend(interp_vars,gfs_data,blend_range=5000):
          blended_vars['zh'] = X_out
          continue
       X_gfs = gfs_data[key]
-      for i in range(d1):
-         for j in range(d2):
-            #Find the top and bottom valid indices for each grid point
-            bot = np.where(X_aida[:,i,j] != -999.0)[0][-1]
-            top = np.where(X_aida[:,i,j] != -999.0)[0][0]
+      if blend_range > 0:
+         for i in range(d1):
+            for j in range(d2):
+               #Find the top and bottom valid indices for each grid point
+               bot = np.where(X_aida[:,i,j] != -999.0)[0][-1]
+               top = np.where(X_aida[:,i,j] != -999.0)[0][0]
 
-            #Blend the bottom to blend_range Pa above
-            p_sub_bot = p[:bot,i,j] - p[bot,i,j] + blend_range
-            bot_top = np.where(p_sub_bot > 0.0 )[0][0]
+               #Blend the bottom to blend_range Pa above
+               p_sub_bot = p[:bot,i,j] - p[bot,i,j] + blend_range
+               bot_top = np.where(p_sub_bot > 0.0 )[0][0]
 
-            for k in range(bot_top,bot):
-               X_out[k,i,j] = (X_aida[k,i,j] * (p[bot,i,j] - p[k,i,j]) + 
-                            X_gfs[k,i,j] * (blend_range - (p[bot,i,j] - p[k,i,j]))) / blend_range
+               for k in range(bot_top,bot):
+                  X_out[k,i,j] = (X_aida[k,i,j] * (p[bot,i,j] - p[k,i,j]) + 
+                               X_gfs[k,i,j] * (blend_range - (p[bot,i,j] - p[k,i,j]))) / blend_range
 
-            p_sub_top = p[top+1:,i,j] - p[top,i,j] - blend_range
-            top_bot = np.where(p_sub_top < 0.0)[0][-1] + top + 1
-            for k in range(top,top_bot+1):
-               X_out[k,i,j] = (X_aida[k,i,j] * (p[k,i,j] - p[top,i,j]) + 
-                            X_gfs[k,i,j] * (blend_range - (p[k,i,j] - p[top,i,j]))) / blend_range
+               p_sub_top = p[top+1:,i,j] - p[top,i,j] - blend_range
+               top_bot = np.where(p_sub_top < 0.0)[0][-1] + top + 1
+               for k in range(top,top_bot+1):
+                  X_out[k,i,j] = (X_aida[k,i,j] * (p[k,i,j] - p[top,i,j]) + 
+                               X_gfs[k,i,j] * (blend_range - (p[k,i,j] - p[top,i,j]))) / blend_range
 
       #Lastly, fill in the remaining locations with the GFS solution
       X_out = np.where(X_out == -999.0, X_gfs, X_out)
@@ -385,51 +414,137 @@ def blend(interp_vars,gfs_data,blend_range=5000):
 
    return blended_vars
 
-def write_gfs(in_fname, gfs_data):
+def write_gfs(in_fname, gfs_data, new_data):
+
+   fname = in_fname.split("/")[-1]
+
+   if not isdir("out"):
+      mkdir("out")
+   out = nc.Dataset("out/" + fname, 'w')
+
+   #Create dimensions
+   lon = out.createDimension("lon", gfs_data["lon"])
+   lat = out.createDimension("lat", gfs_data["lat"])
+   lonp = out.createDimension("lonp", gfs_data["lonp"])
+   latp = out.createDimension("latp", gfs_data["latp"])
+   lev = out.createDimension("lev", gfs_data["lev"])
+   levp = out.createDimension("levp", gfs_data["levp"])
+   ntracer = out.createDimension("ntracer", gfs_data["ntracer"])
+
+   #GFS lat/lon grids
+   geolon = out.createVariable("geolon","f4",("lat","lon"))
+   geolat = out.createVariable("geolat","f4",("lat","lon"))
+   geolon_s = out.createVariable("geolon_s","f4",("latp","lon"))
+   geolat_s = out.createVariable("geolat_s","f4",("latp","lon"))
+   geolon_w = out.createVariable("geolon_w","f4",("lat","lonp"))
+   geolat_w = out.createVariable("geolat_w","f4",("lat","lonp"))
+   geolat[:,:] = gfs_data["geolat"]
+   geolat_w[:,:] = gfs_data["geolat_w"]
+   geolat_s[:,:] = gfs_data["geolat_s"]
+   geolon[:,:] = gfs_data["geolon"]
+   geolon_w[:,:] = gfs_data["geolon_w"]
+   geolon_s[:,:] = gfs_data["geolon_s"]
+   [geolat.long_name, geolat_s.long_name, geolat_w.long_name] = ["Latitude" + att for att in ["", "_s", "_w"]]
+   [geolon.long_name, geolon_s.long_name, geolon_w.long_name] = ["Longitude" + att for att in ["", "_s", "_w"]]
+   [geolat.units, geolat_s.units, geolat_w.units] = ["degrees_north" for dmy in ["", "", ""]]
+   [geolon.units, geolon_s.units, geolon_w.units] = ["degrees_east" for dmy in ["","",""]]
+
+   #Create the output variables
+   ps = out.createVariable("ps","f4",("lat","lon"))
+   w = out.createVariable("w","f4",("lev","lat","lon"))
+   zh = out.createVariable("zh","f4",("levp","lat","lon"))
+   t = out.createVariable("t","f4",("lev","lat","lon"))
+   delp = out.createVariable("delp","f4",("lev","lat","lon"))
+   sphum = out.createVariable("sphum","f4",("lev","lat","lon"))
+   liq_wat = out.createVariable("liq_wat","f4",("lev","lat","lon"))
+   o3mr = out.createVariable("o3mr","f4",("lev","lat","lon"))
+   ice_wat = out.createVariable("ice_wat","f4",("lev","lat","lon"))
+   rainwat = out.createVariable("rainwat","f4",("lev","lat","lon"))
+   snowwat = out.createVariable("snowwat","f4",("lev","lat","lon"))
+   graupel = out.createVariable("graupel","f4",("lev","lat","lon"))
+   u_w = out.createVariable("u_w","f4",("lev","lat","lonp"))
+   v_w = out.createVariable("v_w","f4",("lev","lat","lonp"))
+   u_s = out.createVariable("u_s","f4",("lev","latp","lon"))
+   v_s = out.createVariable("v_s","f4",("lev","latp","lon"))
+
+   #Populate variables with data
+   ps[:,:] = gfs_data["ps"]
+   delp[:,:,:] = gfs_data["delp"]
+   #Geopotential height is tricky.  For now, just copy over the original GFS data.
+   zh[:,:,:] = gfs_data["zh"]
+   t[:,:,:] = new_data["t"]
+   sphum[:,:,:] = new_data["sphum"]
+   u_w[:,:,:] = new_data["u_w"]
+   v_w[:,:,:] = new_data["v_w"]
+   u_s[:,:,:] = new_data["u_s"]
+   v_s[:,:,:] = new_data["v_s"]
+   v_s[:,:,:] = new_data["v_s"]
+   #The following don't have AIDA solutions yet, so just use input GFS data
+   liq_wat[:,:,:] = gfs_data["liq_wat"]
+   o3mr[:,:,:] = gfs_data["o3mr"]
+   ice_wat[:,:,:] = gfs_data["ice_wat"]
+   rainwat[:,:,:] = gfs_data["rainwat"]
+   snowwat[:,:,:] = gfs_data["snowwat"]
+   graupel[:,:,:] = gfs_data["graupel"]
+
+   #Set coordinates attribute for each variable
+   for var in [ps, delp, w, zh, t, sphum, liq_wat, o3mr, ice_wat, rainwat, snowwat, graupel]:
+      var.coordinates = "geolon geolat"
+
+   for var in [u_s, v_s]:
+      var.coordinates = "geolon_s geolat_s"
+
+   for var in [u_w, v_w]:
+      var.coordinates = "geolon_w geolat_w"
+
+   #Write the source global attribute
+   out.source = gfs_data["source"]
+
+   out.close()
 
    return
 
-def write_debug(in_fname, gfs_data, aida_data):
+def write_debug(in_fname, gfs_data, aida_data, regrid_vars, interp_vars, blended_vars, final_vars):
 
    tile_ext = in_fname.split(".")[-2]
    out = nc.Dataset("out_gfs." + tile_ext + ".nc", 'w')
-   gfs_lev = out.createDimension("lev", gfs_data.lev)
-   gfs_levp = out.createDimension("levp", gfs_data.levp)
+   gfs_lev = out.createDimension("lev", gfs_data["lev"])
+   gfs_levp = out.createDimension("levp", gfs_data["levp"])
 
-   lat = out.createDimension("lat", gfs_data.lat)
-   lon = out.createDimension("lon", gfs_data.lon)
-   latp = out.createDimension("latp", gfs_data.latp)
-   lonp = out.createDimension("lonp", gfs_data.lonp)
+   lat = out.createDimension("lat", gfs_data["lat"])
+   lon = out.createDimension("lon", gfs_data["lon"])
+   latp = out.createDimension("latp", gfs_data["latp"])
+   lonp = out.createDimension("lonp", gfs_data["lonp"])
 
    #GFS lat/lon grids
    geolat = out.createVariable("geolat","f4",("lat","lon"))
-   geolatw = out.createVariable("geolatw","f4",("lat","lonp"))
-   geolats = out.createVariable("geolats","f4",("latp","lon"))
+   geolat_w = out.createVariable("geolat_w","f4",("lat","lonp"))
+   geolat_s = out.createVariable("geolat_s","f4",("latp","lon"))
    geolon = out.createVariable("geolon","f4",("lat","lon"))
-   geolonw = out.createVariable("geolonw","f4",("lat","lonp"))
-   geolons = out.createVariable("geolons","f4",("latp","lon"))
+   geolon_w = out.createVariable("geolon_w","f4",("lat","lonp"))
+   geolon_s = out.createVariable("geolon_s","f4",("latp","lon"))
    geolat[:,:] = gfs_data["geolat"]
-   geolatw[:,:] = gfs_data["geolat_w"]
-   geolats[:,:] = gfs_data["geolat_s"]
+   geolat_w[:,:] = gfs_data["geolat_w"]
+   geolat_s[:,:] = gfs_data["geolat_s"]
    geolon[:,:] = gfs_data["geolon"]
-   geolonw[:,:] = gfs_data["geolon_w"]
-   geolons[:,:] = gfs_data["geolon_s"]
+   geolon_w[:,:] = gfs_data["geolon_w"]
+   geolon_s[:,:] = gfs_data["geolon_s"]
 
    #Original GFS surface pressure
-   ps = out.createVariable("ps","f8",("lat","lon"))
+   ps = out.createVariable("ps","f4",("lat","lon"))
    ps[:,:] = gfs_data["ps"]
-   delp = out.createVariable("delp","f8",("lev","lat","lon"))
+   delp = out.createVariable("delp","f4",("lev","lat","lon"))
    delp[:,:,:] = gfs_data["delp"]
 
    #Regridded AI-DA quantities at the AI-DA pressure levels
-   aida_lev = out.createDimension("aida_lev", aida_nlev)
-   t_r = out.createVariable("t_r","f8",("aida_lev","lat","lon"))
-   zh_r = out.createVariable("zh_r","f8",("aida_lev","lat","lon"))
-   sphum_r = out.createVariable("sphum_r","f8",("aida_lev","lat","lon"))
-   u_w_r = out.createVariable("u_w_r","f8",("aida_lev","lat","lonp"))
-   v_w_r = out.createVariable("v_w_r","f8",("aida_lev","lat","lonp"))
-   u_s_r = out.createVariable("u_s_r","f8",("aida_lev","latp","lon"))
-   v_s_r = out.createVariable("v_s_r","f8",("aida_lev","latp","lon"))
+   aida_lev = out.createDimension("aida_lev", aida_data["lev"])
+   t_r = out.createVariable("t_r","f4",("aida_lev","lat","lon"))
+   zh_r = out.createVariable("zh_r","f4",("aida_lev","lat","lon"))
+   sphum_r = out.createVariable("sphum_r","f4",("aida_lev","lat","lon"))
+   u_w_r = out.createVariable("u_w_r","f4",("aida_lev","lat","lonp"))
+   v_w_r = out.createVariable("v_w_r","f4",("aida_lev","lat","lonp"))
+   u_s_r = out.createVariable("u_s_r","f4",("aida_lev","latp","lon"))
+   v_s_r = out.createVariable("v_s_r","f4",("aida_lev","latp","lon"))
 
    t_r[:,:,:] = regrid_vars["t"]
    zh_r[:,:,:] = regrid_vars["zh"]

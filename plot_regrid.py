@@ -83,9 +83,9 @@ logp[subset] = np.log(p[subset])
 log_350 = np.log(35000.0)
 for i in range(p.shape[1]):
    for j in range(p.shape[2]):
-      numer = (final_t[ndx_350[i,j],i,j] - final_t[ndx_350[i,j]+1,i,j]) * (log_350-logp[ndx_350[i,j]+1,i,j])
-      denom = logp[ndx_350[i,j],i,j] - logp[ndx_350[i,j]+1,i,j]
-      gfs_int_350_t[i,j] = final_t[ndx_350[i,j]+1,i,j] + numer / denom
+      numer = (final_t[ndx_350[i,j],i,j] - final_t[ndx_350[i,j]-1,i,j]) * (log_350-logp[ndx_350[i,j]-1,i,j])
+      denom = logp[ndx_350[i,j],i,j] - logp[ndx_350[i,j]-1,i,j]
+      gfs_int_350_t[i,j] = final_t[ndx_350[i,j]-1,i,j] + numer / denom
 
 print("Done interpolating")
 diff_350_t = gfs_int_350_t - regrid_350_t
