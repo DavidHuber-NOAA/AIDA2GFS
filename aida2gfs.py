@@ -176,6 +176,11 @@ def aida2gfs(aida_data, gfs_fname, ctrl_fname, debug="no", do_blend="no"):
    else:
       final_vars = interp_vars
 
+   #Copy GFS data for missing AIDA inputs
+   copy_list = ["w", "sphum", "o3mr", "ice_wat", "rainwat", "snowwat", "graupel"]
+   for var in copy_list:
+      final_vars[var] = gfs_data[var]
+
    #Write out the new GFS input file
    print("Write AIDA data to a new GFS netCDF4 file")
    write_gfs(gfs_fname, gfs_data, final_vars)
@@ -470,6 +475,7 @@ def write_gfs(in_fname, gfs_data, new_data):
    #Populate variables with data
    ps[:,:] = gfs_data["ps"]
    delp[:,:,:] = gfs_data["delp"]
+   w[:,:,:] = gfs_data["w"]
    #Geopotential height is tricky.  For now, just copy over the original GFS data.
    zh[:,:,:] = gfs_data["zh"]
    t[:,:,:] = new_data["t"]
@@ -507,7 +513,7 @@ def write_gfs(in_fname, gfs_data, new_data):
 def write_debug(in_fname, gfs_data, aida_data, regrid_vars, interp_vars, blended_vars, final_vars):
 
    tile_ext = in_fname.split(".")[-2]
-   out = nc.Dataset("out_gfs." + tile_ext + ".nc", 'w')
+   out = nc.Dataset("debug/debug." + tile_ext + ".nc", 'w')
    gfs_lev = out.createDimension("lev", gfs_data["lev"])
    gfs_levp = out.createDimension("levp", gfs_data["levp"])
 
