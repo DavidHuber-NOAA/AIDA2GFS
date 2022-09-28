@@ -13,10 +13,23 @@ fi
 #hgt=("1000" "925" "850" "700" "500" "200" "100" "10")
 hgt=("700" "500" "200")
 
-var=("t")
+var=("PRATE" "TMP" "HGT" "UGRD" "VGRD")
 
-for i in ${!hgt[@]}; do
-   for j in ${!var[@]}; do
+for j in ${!var[@]}; do
+   if [[ ${var[j]} == "PRATE" ]]; then
+      x=${var[$j]}
+      if [ -z ${prefix+x} ]; then
+         plot=$(echo "${plot_dir}/${x}")
+      else
+         plot=$(echo "${plot_dir}/${prefix}_${x}")
+      fi
+      plot_data_plane $file ${plot}.ps 'name=''"'$x'"''; level=''"'Z0'"'';' \
+         -title "$prefix ${x} at ${h}mb"
+      convert -rotate 90 -trim ${plot}.ps ${plot}.png
+      rm ${plot}.ps
+      continue
+   fi
+   for i in ${!hgt[@]}; do
       x=${var[$j]}
       h=${hgt[$i]}
       if [ -z ${prefix+x} ]; then
