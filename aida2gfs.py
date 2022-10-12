@@ -5,8 +5,9 @@ import numpy as np
 import xesmf as xe
 from os import mkdir
 from os.path import isdir
+from inv_calrh import calc_q
 
-def get_aida(aida_out_fname):
+def get_aida(aida_out_fname, convert_rh="no"):
 
    aida_fh = nc.Dataset(aida_out_fname, 'r')
    lev = 4
@@ -30,7 +31,7 @@ def get_aida(aida_out_fname):
    u = np.zeros((lev,lat,lon))
    v = np.zeros((lev,lat,lon))
    t = np.zeros((lev,lat,lon))
-   sphum = np.zeros((lev,lat,lon))
+   rh_or_q = np.zeros((lev,lat,lon))
    zh = np.zeros((lev,lat,lon))
 
    #Read in the arrays; aida_data goes from 90 to -90
@@ -38,8 +39,8 @@ def get_aida(aida_out_fname):
       t[i,:,:-1] = aida_out[0,::-1,:,lev*0+i]
       t[i,:,-1] = t[i,:,0]
 
-      sphum[i,:,:-1] = aida_out[0,::-1,:,lev*1+i]
-      sphum[i,:,-1] = sphum[i,:,0]
+      rh_or_q[i,:,:-1] = aida_out[0,::-1,:,lev*1+i]
+      rh_or_q[i,:,-1] = rh_or_q[i,:,0]
 
       zh[i,:,:-1] = aida_out[0,::-1,:,lev*2+i]
       zh[i,:,-1] = zh[i,:,0]
@@ -51,6 +52,20 @@ def get_aida(aida_out_fname):
       v[i,:,-1] = v[i,:,0]
 
    aida_fh.close()
+
+   #If the input water vapor quantity is RH, convert to q
+   if(convert_rh.lower() == "yes"):
+      #Convert RH to a decimal
+      rh = rh_or_q / 100.0
+      #Convert P to a 3-d field
+      p3d = np.zeros((lev,lat,lon))
+      for i in range(lev):
+         p3d[i,:,:] = p[i]
+
+      sphum = np.zeros(rh.shape)
+      sphum = calc_q(p3d, t, rh)
+   else:
+      sphum = rh_or_q
 
    #Create a dict with all of the AIDA data in it
    aida_data = { 'lev' : lev,
@@ -177,7 +192,7 @@ def aida2gfs(aida_data, gfs_fname, ctrl_fname, debug="no", do_blend="no"):
       final_vars = interp_vars
 
    #Copy GFS data for missing AIDA inputs
-   copy_list = ["w", "sphum", "o3mr", "ice_wat", "rainwat", "snowwat", "graupel"]
+   copy_list = ["w", "o3mr", "ice_wat", "rainwat", "snowwat", "graupel"]
    for var in copy_list:
       final_vars[var] = gfs_data[var]
 
@@ -475,9 +490,8 @@ def write_gfs(in_fname, gfs_data, new_data):
    #Populate variables with data
    ps[:,:] = gfs_data["ps"]
    delp[:,:,:] = gfs_data["delp"]
-   w[:,:,:] = gfs_data["w"]
    #Geopotential height is tricky.  For now, just copy over the original GFS data.
-   zh[:,:,:] = gfs_data["zh"]
+   zh[:,:,:] = new_data["zh"]
    t[:,:,:] = new_data["t"]
    sphum[:,:,:] = new_data["sphum"]
    u_w[:,:,:] = new_data["u_w"]
@@ -486,6 +500,7 @@ def write_gfs(in_fname, gfs_data, new_data):
    v_s[:,:,:] = new_data["v_s"]
    v_s[:,:,:] = new_data["v_s"]
    #The following don't have AIDA solutions yet, so just use input GFS data
+   w[:,:,:] = gfs_data["w"]
    liq_wat[:,:,:] = gfs_data["liq_wat"]
    o3mr[:,:,:] = gfs_data["o3mr"]
    ice_wat[:,:,:] = gfs_data["ice_wat"]

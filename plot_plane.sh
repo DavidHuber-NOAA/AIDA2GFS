@@ -13,7 +13,7 @@ fi
 #hgt=("1000" "925" "850" "700" "500" "200" "100" "10")
 hgt=("700" "500" "200")
 
-var=("WIND" "TMP" "HGT")
+var=("WIND" "TMP" "HGT" "RH")
 
 declare -A ranges
 ranges["200HGT"]="10000 13000"
