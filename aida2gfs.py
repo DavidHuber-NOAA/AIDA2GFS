@@ -312,6 +312,11 @@ def regrid(regrid_geolat,regrid_geolon,in_geolat,in_geolon,input_data,var_list,e
    (in_geolat, in_geolon) = (save_in_geolat, save_in_geolon)
    (regrid_geolat, regrid_geolon) = (save_regrid_geolat, save_regrid_geolon)
 
+   for name, var in zip(out_names, out_vars):
+      if(var.min() == -999.0):
+         print("REGRID: There was a problem regridding", name)
+         raise ValueError("Failed to regrid")
+
    return (out_names, out_vars)
 
 def vert_interp(dict_in,gfs_data,aida_p):
@@ -400,12 +405,13 @@ def blend(interp_vars,gfs_data,blend_range=5000):
       else:
          p = gfs_data['p']
       X_out = X_aida
+      X_gfs = gfs_data[key]
       #Do not blend geopotential height
-      #TODO Estimate pressure at zh (half) levels
+      #TODO blend zh; defined on half levels!
       if(key == "zh"):
+         X_out = np.where(X_out == -999.0, X_gfs, X_out)
          blended_vars['zh'] = X_out
          continue
-      X_gfs = gfs_data[key]
       if blend_range > 0:
          for i in range(d1):
             for j in range(d2):
@@ -429,6 +435,10 @@ def blend(interp_vars,gfs_data,blend_range=5000):
 
       #Lastly, fill in the remaining locations with the GFS solution
       X_out = np.where(X_out == -999.0, X_gfs, X_out)
+
+      if(X_out.min() == -999.0):
+         print("There was a problem blending " + key + ".")
+         raise ValueError("Blending failed!")
 
       blended_vars[key] = X_out
 
