@@ -34,7 +34,9 @@ def get_aida(aida_out_fname, convert_rh="no"):
    rh_or_q = np.zeros((lev,lat,lon))
    zh = np.zeros((lev,lat,lon))
 
-   #Read in the arrays; aida_data goes from 90 to -90
+   #Read in the arrays; aida_data goes from 90 to -90, 0 to 359.65 (or so)
+   #Repeat the first longitudinal slice at the end of each array so the
+   #data goes from 0 to 360.
    for i in range(lev):
       t[i,:,:-1] = aida_out[0,::-1,:,lev*0+i]
       t[i,:,-1] = t[i,:,0]
@@ -293,12 +295,17 @@ def regrid(regrid_geolat,regrid_geolon,in_geolat,in_geolon,input_data,var_list,e
       z = [k for k in range(input_data["lev"])]
       out_dr = xr.DataArray(dmy, coords = {'z':('z',z), "lat": (('x','y'), regrid_geolat),
                                            "lon": (('x','y'),regrid_geolon)}, dims = ('z', 'x', 'y'))
+      #Perform the regridding for each variable in the list
       for var in var_list:
+         #Initialize the output
          X = np.zeros([input_data[var].shape[0],regrid_geolon.shape[0],regrid_geolon.shape[1]]) - 999.0
 
+         #Create the input data array
          in_dr = xr.DataArray(input_data[var][:,:,:], dims = ('z','x', 'y'),
                coords = {'z':('z', z), 'lat':(('x','y'), in_geolat), 'lon':(('x','y'), in_geolon)})
+         #Define the regridding function with extrapolation enabled
          f = xe.Regridder(in_dr, out_dr, 'bilinear', extrap_method="inverse_dist")
+         #Perform the regridding
          X[:,:,:] = f(in_dr).data
 
          out_vars.append(X)
