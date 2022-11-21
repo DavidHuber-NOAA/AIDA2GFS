@@ -304,7 +304,7 @@ def regrid(regrid_geolat,regrid_geolon,in_geolat,in_geolon,input_data,var_list,e
          in_dr = xr.DataArray(input_data[var][:,:,:], dims = ('z','x', 'y'),
                coords = {'z':('z', z), 'lat':(('x','y'), in_geolat), 'lon':(('x','y'), in_geolon)})
          #Define the regridding function with extrapolation enabled
-         f = xe.Regridder(in_dr, out_dr, 'bilinear', extrap_method="inverse_dist")
+         f = xe.Regridder(in_dr, out_dr, 'bilinear', extrap_method="nearest_s2d")
          #Perform the regridding
          X[:,:,:] = f(in_dr).data
 
@@ -326,7 +326,23 @@ def regrid(regrid_geolat,regrid_geolon,in_geolat,in_geolon,input_data,var_list,e
 
    return (out_names, out_vars)
 
-def vert_interp(dict_in,gfs_data,aida_p):
+def vert_interp(dict_in,gfs_data,aida_p,lim_p=20.0):
+   '''
+   Perform veritical interpolation of AIDA data to the GFS grid between AIDA edges
+   or the surface, whichever is higher.
+
+   Inputs:
+     dict_in: AIDA data regridded to the GFS horizontal grid
+     aida_p: AIDA pressure levels
+     (optional): lim_p how high above the surface in mb should AIDA data be
+                 filtered out.  E.G. if surface pressure is 760mb, the bottom
+                 AIDA pressure is 750mb, and lim_p = 20mb, then this data point
+                 will not be used for interpolation.
+     gfs_data: raw GFS input data based on GSI analysis
+
+   Return:
+     data_out: vertically interpolated AIDA data
+   '''
 
    #Initialize the output dict
    dict_out = {}
@@ -367,9 +383,13 @@ def vert_interp(dict_in,gfs_data,aida_p):
          p = p_c
          gfs_logp = gfs_logp_c
 
+      #Get cutoff surface pressure for AIDA data points
+      p_surf = p[-1,:,:] - lim_p
+
       AIDA_ndx = np.zeros(p.shape) - 1
       for i in range(n_aida-2,-1,-1):
-         AIDA_ndx = np.where(AIDA_ndx == -1, np.where((p > aida_p[i]) & (p <= aida_p[i+1]), i, AIDA_ndx), AIDA_ndx)
+         AIDA_ndx = np.where(AIDA_ndx == -1, np.where((p > aida_p[i]) & (p <= aida_p[i+1]) &
+                    (aida_p[i+1] < p_surf), i, AIDA_ndx), AIDA_ndx)
 
       #Preassign interpolation pressures and Xs based on AIDA_ndx
       P0 = np.zeros(p.shape) - 999.0
