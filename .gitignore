@@ -1,2 +1,7 @@
 **.nc
 __pycache__
+**.png
+**.tar
+**.gz
+plotters/data
+plotters/out
