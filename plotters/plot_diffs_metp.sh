@@ -17,6 +17,9 @@ fcst_init_cyc=$(echo $fcst_init | cut -b 9-10)
 echo mkdir $stmp
 mkdir -p $stmp
 
+#Get plot difference plot ranges, declared as 'ranges'
+. cfg/diff_ranges.cfg
+
 set -eu
 for var in "wind" "hgt" "rh"; do
    cfg="${var}_diff.cfg"
@@ -40,7 +43,7 @@ for var in "wind" "hgt" "rh"; do
       for lev in "200" "500" "700"; do
          field="DIFF_${NAME}_P${lev}_${NAME}_P${lev}_FULL"
          cfg_string='name=''"'${field}'"'';level=''"'P${lev}'"'';'
-         range_string="-plot_range -70 70"
+         range_string="-plot_range ${ranges[${lev}${VAR}]}"
 
          ps_name="gsi_vs_aida/d${d}/diff_${name_fcst}_${lev}mb_${var}_d${d}.ps"
          png_name="gsi_vs_aida/d${d}/diff_${name_fcst}_${lev}mb_${var}_d${d}.png"
@@ -50,6 +53,3 @@ for var in "wind" "hgt" "rh"; do
    done
 
 done
-
-
-
