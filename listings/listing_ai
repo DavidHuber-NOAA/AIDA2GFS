@@ -1,0 +1,11 @@
+netcdf exp004murz_pernak_predict_PREP_test_for_GFS {
+dimensions:
+	ni = 1 ;
+	nx = 512 ;
+	ny = 1024 ;
+	nchan = 21 ;
+variables:
+	float tb_image(ni, nx, ny, nchan) ;
+	float tb_input(ni, nx, ny, nchan) ;
+	float tb_target(ni, nx, ny, nchan) ;
+}

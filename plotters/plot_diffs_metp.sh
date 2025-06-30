@@ -1,6 +1,6 @@
 #!/usr/bin/bash
 
-fcst_dir="/scratch1/NESDIS/nesdis-rdo2/David.Huber/archive/base_dmy"
+fcst_dir="/scratch1/NESDIS/nesdis-rdo2/David.Huber/archive/aida_p0"
 anl_dir="/scratch1/NCEPDEV/global/Mallory.Row/archive/gfs"
 fcst_tmpl="pgbfHH.gfs.PDYCYC.grib2"
 anl_tmpl="pgbanl.gfs.PDYCYC"

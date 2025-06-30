@@ -1,0 +1,64 @@
+netcdf gfs_data.tile1 {
+dimensions:
+	lon = 384 ;
+	lat = 384 ;
+	lonp = 385 ;
+	latp = 385 ;
+	lev = 128 ;
+	levp = 129 ;
+	ntracer = 7 ;
+variables:
+	float geolon(lat, lon) ;
+		geolon:long_name = "Longitude" ;
+		geolon:units = "degrees_east" ;
+	float geolat(lat, lon) ;
+		geolat:long_name = "Latitude" ;
+		geolat:units = "degrees_north" ;
+	float geolon_s(latp, lon) ;
+		geolon_s:long_name = "Longitude_s" ;
+		geolon_s:units = "degrees_east" ;
+	float geolat_s(latp, lon) ;
+		geolat_s:long_name = "Latitude_s" ;
+		geolat_s:units = "degrees_north" ;
+	float geolon_w(lat, lonp) ;
+		geolon_w:long_name = "Longitude_w" ;
+		geolon_w:units = "degrees_east" ;
+	float geolat_w(lat, lonp) ;
+		geolat_w:long_name = "Latitude_w" ;
+		geolat_w:units = "degrees_north" ;
+	float ps(lat, lon) ;
+		ps:coordinates = "geolon geolat" ;
+	float w(lev, lat, lon) ;
+		w:coordinates = "geolon geolat" ;
+	float zh(levp, lat, lon) ;
+		zh:coordinates = "geolon geolat" ;
+	float t(lev, lat, lon) ;
+		t:coordinates = "geolon geolat" ;
+	float delp(lev, lat, lon) ;
+		delp:coordinates = "geolon geolat" ;
+	float sphum(lev, lat, lon) ;
+		sphum:coordinates = "geolon geolat" ;
+	float liq_wat(lev, lat, lon) ;
+		liq_wat:coordinates = "geolon geolat" ;
+	float o3mr(lev, lat, lon) ;
+		o3mr:coordinates = "geolon geolat" ;
+	float ice_wat(lev, lat, lon) ;
+		ice_wat:coordinates = "geolon geolat" ;
+	float rainwat(lev, lat, lon) ;
+		rainwat:coordinates = "geolon geolat" ;
+	float snowwat(lev, lat, lon) ;
+		snowwat:coordinates = "geolon geolat" ;
+	float graupel(lev, lat, lon) ;
+		graupel:coordinates = "geolon geolat" ;
+	float u_w(lev, lat, lonp) ;
+		u_w:coordinates = "geolon_w geolat_w" ;
+	float v_w(lev, lat, lonp) ;
+		v_w:coordinates = "geolon_w geolat_w" ;
+	float u_s(lev, latp, lon) ;
+		u_s:coordinates = "geolon_s geolat_s" ;
+	float v_s(lev, latp, lon) ;
+		v_s:coordinates = "geolon_s geolat_s" ;
+
+// global attributes:
+		:source = "FV3GFS GAUSSIAN NEMSIO FILE" ;
+}

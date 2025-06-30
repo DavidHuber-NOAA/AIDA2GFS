@@ -1,0 +1,8 @@
+#!/usr/bin/bash
+
+#SBATCH --account=nesdis-rdo2
+#SBATCH --partition=s4
+#SBATCH --time=0:30:00
+#SBATCH -N 1
+#SBATCH -o aida2gfs.out
+
